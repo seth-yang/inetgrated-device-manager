@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+@SuppressWarnings ("unused")
 public interface IDownlinkService extends IDisposable {
     /**
      * 异步执行命令下发

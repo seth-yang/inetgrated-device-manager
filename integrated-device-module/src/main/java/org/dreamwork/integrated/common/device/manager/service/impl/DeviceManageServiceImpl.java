@@ -1,6 +1,8 @@
 package org.dreamwork.integrated.common.device.manager.service.impl;
 
-import org.dreamwork.integrated.common.device.manager.api.model.DownlinkStatus;
+import org.dreamwork.concurrent.BatchProcessor;
+import org.dreamwork.db.ITransaction;
+import org.dreamwork.db.PostgreSQL;
 import org.dreamwork.integrated.common.device.manager.api.model.NetworkProtocol;
 import org.dreamwork.integrated.common.device.manager.api.model.database.*;
 import org.dreamwork.integrated.common.device.manager.api.services.IDeviceManageService;
@@ -11,9 +13,6 @@ import org.dreamwork.integration.api.annotation.AConfigured;
 import org.dreamwork.integration.api.services.IDatabaseService;
 import org.dreamwork.integration.api.services.IRedisManager;
 import org.dreamwork.integration.api.services.IRedisService;
-import org.dreamwork.concurrent.BatchProcessor;
-import org.dreamwork.db.ITransaction;
-import org.dreamwork.db.PostgreSQL;
 import org.dreamwork.persistence.DatabaseSchema;
 import org.dreamwork.util.IDisposable;
 import org.dreamwork.util.ITypedMap;
@@ -64,12 +63,15 @@ public class DeviceManageServiceImpl implements IDeviceManageService, IDisposabl
     @AConfigured ("${org.dreamwork.integrated.logger.batch.timeout}")
     private int timeout = 60000;
 
+    @AConfigured ("${org.dreamwork.integrated.datasource.name}")
+    private String jdbcName = "jdbc/integrated_projects";
+
     @PostConstruct
     public void init () throws IntegrationException {
         DeviceManagerSchema.registerAllSchemas ();
         {
             IDatabaseService service = context.findService (IDatabaseService.class);
-            postgres = new PostgreSQL (service.getDataSource ("jdbc/integrated_projects"));
+            postgres = new PostgreSQL (service.getDataSource (jdbcName));
             checkAndCreateSchemas ();
         }
 
@@ -88,7 +90,7 @@ public class DeviceManageServiceImpl implements IDeviceManageService, IDisposabl
                     List<MqttLog> mqtt   = new ArrayList<> ();
                     List<RawDataLog> raw = new ArrayList<> ();
                     List<DownlinkLog> downlinkForSave   = new ArrayList<> (),
-                                      downLinkForUpdate = new ArrayList<> ();
+                            downLinkForUpdate = new ArrayList<> ();
                     lock (() -> {
                         for (Object o : data) {
                             if (o instanceof MqttLog) {
@@ -319,18 +321,6 @@ public class DeviceManageServiceImpl implements IDeviceManageService, IDisposabl
         postgres.executeUpdate (sql, value, imei, moduleName);
     }
 
-    private static final String DOWNLINK_SERIALS = "downlink.serials";
-    @Override
-    public long getNextDownlinkSerial (String moduleName, String imei, long maxValue) {
-        String member = moduleName + '.' + imei;
-        long number = (long) redis.increase (DOWNLINK_SERIALS, member);
-        if (number > maxValue) {
-            redis.resetCounter (DOWNLINK_SERIALS, member);
-            return 0;
-        }
-        return number;
-    }
-
     @Override
     public int getCurrentValue (String moduleName, String imei) {
         String sql = "SELECT * FROM downlink_serial WHERE imei = ? AND module_name = ?";
@@ -363,62 +353,6 @@ public class DeviceManageServiceImpl implements IDeviceManageService, IDisposabl
     }
 
     @Override
-    public DownlinkLog getDownlinkLog (String moduleName, String imei, int serialNo) {
-        String sql =
-                "  SELECT * FROM downlink_log " +
-                "   WHERE imei = ? AND module_name = ? and serial_no = ? " +
-                "ORDER BY downlink_time DESC " +
-                "   LIMIT 1";
-        List<DownlinkLog> logs = postgres.list (DownlinkLog.class, sql, imei, moduleName, serialNo);
-        return logs != null && !logs.isEmpty () ? logs.get (0) : null;
-    }
-
-    @Override
-    public void replyDownlinkLog (String moduleName, String imei, int serialNo, DownlinkStatus status, String content) {
-        String sql =
-                "UPDATE downlink_log SET " +
-                "    downlink_status = ?," +
-                "    reply_time = current_timestamp," +
-                "    reply = ? " +
-                " WHERE id = (SELECT id FROM downlink_log " +
-                "              WHERE imei = ? AND module_name = ? AND serial_no = ? " +
-                "           ORDER BY downlink_time DESC LIMIT 1)";
-        postgres.executeUpdate (sql, status.name (), content, imei, moduleName, serialNo);
-    }
-
-    @Override
-    public void cacheCommand (String moduleName, String imei, String command, long lifetime) {
-        String key = "downlink.cache." + moduleName + "." + imei + "." + System.currentTimeMillis ();
-        redis.set (key, command);
-        if (lifetime > 0) {
-            redis.setExpiredIn (key, (int) lifetime);
-        }
-    }
-
-    @Override
-    public void deleteCachedCommand (String moduleName, String imei, long timestamp) {
-        String key = "downlink.cache." + moduleName + "." + imei + "." + timestamp;
-        redis.delete (key);
-    }
-
-    @Override
-    public Map<Long, String> getCachedCommand (String module, String imei) {
-        String pattern = "downlink.cache." + module + "." + imei + ".*";
-        Map<String, String> map = redis.query (pattern);
-        if (isNotEmpty (map)) {
-            Map<Long, String> tree = new TreeMap<> ();
-            map.forEach ((k, v) -> {
-                int index = k.lastIndexOf (".");
-                String part = k.substring (index + 1);
-                long timestamp = Long.parseLong (part);
-                tree.put (timestamp, v);
-            });
-            return tree;
-        }
-        return Collections.emptyMap ();
-    }
-
-    @Override
     public void lock (Runnable runner) {
         try {
             locker.lock ();
@@ -448,8 +382,7 @@ public class DeviceManageServiceImpl implements IDeviceManageService, IDisposabl
         } else {
             // 有了，校验是否一致，否则抛出错误
             DeviceTypeConfig loaded = deviceTypes.get (key);
-            if (!loaded.getModule ().equals (moduleName) ||
-                loaded.getProtocol () != protocol) {
+            if (!loaded.getModule ().equals (moduleName) || loaded.getProtocol () != protocol) {
                 throw new IllegalStateException ("there's another device type config with different module or protocol");
             }
         }

@@ -1,11 +1,9 @@
 package org.dreamwork.integrated.common.device.manager.api.services;
 
-import org.dreamwork.integrated.common.device.manager.api.model.DownlinkStatus;
 import org.dreamwork.integrated.common.device.manager.api.model.NetworkProtocol;
 import org.dreamwork.integrated.common.device.manager.api.model.database.*;
 
 import java.util.List;
-import java.util.Map;
 
 @SuppressWarnings ("unused")
 public interface IDeviceManageService {
@@ -84,8 +82,6 @@ public interface IDeviceManageService {
      */
     void updateDownlinkSerial (String moduleName, String imei, int value);
 
-    long getNextDownlinkSerial (String moduleName, String imei, long maxValue);
-
     /**
      * 获取指定设备的下发序列最新值
      *
@@ -95,50 +91,6 @@ public interface IDeviceManageService {
      */
     int getCurrentValue (String moduleName, String imei);
     List<DownlinkLog> getUnRepliedLogs (String moduleName, String imei);
-
-    /**
-     * 根据指定的模块名称，设备号以及下行序列号来获取最多一条下行日志
-     * @param moduleName 模块名称
-     * @param imei       设备号
-     * @param serialNo   下行序列号
-     * @return 匹配的下行日志
-     */
-    DownlinkLog getDownlinkLog (String moduleName, String imei, int serialNo);
-
-    /**
-     * 应答一条指定的下行日志
-     * @param moduleName 模块名称
-     * @param imei       设备号
-     * @param serialNo   下行的序列号
-     * @param status     应答状态
-     * @param content    应答内容
-     */
-    void replyDownlinkLog (String moduleName, String imei, int serialNo, DownlinkStatus status, String content);
-
-    /**
-     * 以文本的方式缓存待下行的指令
-     * @param moduleName 模块名称
-     * @param imei       设备号
-     * @param command    序列化后的指令
-     * @param lifetime   缓存的存活时间，单位为秒
-     */
-    void cacheCommand (String moduleName, String imei, String command, long lifetime);
-
-    /**
-     * 删除一条已经缓存的指令
-     * @param moduleName 模块名称
-     * @param imei       设备号
-     * @param timestamp  这条指令被缓存的时间戳
-     */
-    void deleteCachedCommand (String moduleName, String imei, long timestamp);
-
-    /**
-     * 获取指定设备的所有缓存指令
-     * @param module 模块名称
-     * @param imei   设备号
-     * @return 该设备所有已缓存的指令。字典的索引是指令的缓存时间戳，值是命令的序列化文本
-     */
-    Map<Long, String> getCachedCommand (String module, String imei);
 
     /**
      * 在日志处理线程内安全执行 runner.run ()，避免内置的日志处理程序和 runner.run () 内部逻辑造成数据竞争
@@ -156,7 +108,6 @@ public interface IDeviceManageService {
      * @param protocol   设备连接的网络协议
      */
     void registerDeviceType (String vendor, String category, String model, String moduleName, NetworkProtocol protocol);
-//    void registerDeviceType (DeviceTypeConfig config);
 
     DeviceTypeConfig getDeviceTypeConfig (String vendor, String category, String model);
 }

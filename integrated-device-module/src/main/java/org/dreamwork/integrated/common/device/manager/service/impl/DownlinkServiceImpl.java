@@ -33,8 +33,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-import static org.dreamwork.integrated.common.device.manager.api.model.DownlinkStatus.Cached;
-import static org.dreamwork.integrated.common.device.manager.api.model.DownlinkStatus.Executing;
+import static org.dreamwork.integrated.common.device.manager.api.model.DownlinkStatus.*;
 import static org.dreamwork.integrated.common.device.manager.util.Const.Error.*;
 import static org.dreamwork.integrated.common.device.manager.util.EntityHelper.isNotEmpty;
 import static org.dreamwork.integrated.common.device.manager.util.EntityHelper.map2commandCache;
@@ -66,7 +65,7 @@ public class DownlinkServiceImpl implements IDownlinkService {
 
     private PostgreSQL postgres;
 
-    @AConfigured ("${org.dreamwork.integrated.device.manager.redis.ref}")
+    @AConfigured ("${com.hothink.integrated.device.manager.redis.ref}")
     private String REDIS_REF;
 
     @PostConstruct
@@ -131,16 +130,21 @@ public class DownlinkServiceImpl implements IDownlinkService {
                     }
                     cache.condition = locker.newCondition ();
                     if (!cache.condition.await (TIMEOUT, TimeUnit.MILLISECONDS)) {
+                        downlinkLog.setStatus (Timeout);
                         // 已经超时
                         return new DownlinkResult (ERR_COMMAND_TIMEOUT, command.serialNo, "timeout");
                     }
+                    downlinkLog.setStatus (Success);
+                    return new DownlinkResult (ERR_OK, command.serialNo, "Success");
                 } finally {
                     locker.unlock ();
+                    if (logger.isTraceEnabled ()) {
+                        logger.trace ("the locke released.");
+                    }
                     pool.remove (key);
-                    manager.deleteCachedCommand (moduleName, imei, cache.timestamp);
+                    deleteCachedCommand (moduleName, imei, cache.timestamp);
+                    manager.save (downlinkLog);
                 }
-                manager.save (downlinkLog);
-                return new DownlinkResult (ERR_OK, command.serialNo, "Success");
             }
         });
     }
@@ -180,6 +184,9 @@ public class DownlinkServiceImpl implements IDownlinkService {
     public void deleteCachedCommand (String moduleName, String imei, long timestamp) {
         String key = buildCachedCommandKey (moduleName, imei, timestamp);
         redis.delete (key);
+        if (logger.isTraceEnabled ()) {
+            logger.trace ("the cached command [{}] removed.", key);
+        }
     }
 
     @Override
@@ -276,8 +283,10 @@ public class DownlinkServiceImpl implements IDownlinkService {
 
     private DownlinkLog getDownlinkLog (String moduleName, Long maxSerialNo, String imei,
                                         DownlinkStatus status, DownlinkCommand command) {
-        long max = maxSerialNo == null ? Long.MAX_VALUE : maxSerialNo;
-        command.serialNo = manager.getNextDownlinkSerial (moduleName, imei, max);
+        if (command.serialNo == null) {
+            long max = maxSerialNo == null ? Long.MAX_VALUE : maxSerialNo;
+            command.serialNo = getNextDownlinkSerial (moduleName, imei, max);
+        }
         DownlinkLog downlinkLog = IDownlinkService.createDownlinkLog (imei, moduleName);
         byte[] data = command.toByteArray ();
         downlinkLog.setCommand (StringUtil.byte2hex (data, false));
